@@ -1,0 +1,10 @@
+{
+  "catalogs": [
+    {
+      "path": "Sources/InAppPromotionKit/Resources/Localizable.xcstrings",
+      "target": "InAppPromotionKit",
+      "sourceRoot": "Sources/InAppPromotionKit",
+      "platforms": ["iOS", "macOS", "visionOS"]
+    }
+  ]
+}
