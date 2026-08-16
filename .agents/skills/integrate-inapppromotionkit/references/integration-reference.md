@@ -66,7 +66,7 @@ Eligibility mapping rules:
 
 With async eligibility, conform to `PromotionEligibilityProviding` and use the `evaluate(_:for:using:)` overload; concurrent evaluations of the same campaign return `.hidden(.evaluationInProgress)`.
 
-`snapshot(for:placement:)` answers `.ineligible` until `evaluate` has run for that campaign in the current process — evaluate once per launch before rendering badges or banners.
+`snapshot(for:placement:)` answers `.ineligible` until `evaluate` has run for that campaign in the current process — evaluate once per launch before rendering badges or banners, and **re-evaluate whenever an eligibility input changes** (entitlement resolves, offering loads, purchase/restore completes). A `.unavailable` result is not retried by the Kit; without a fresh `evaluate` the campaign stays hidden for the whole process.
 
 ## Impressions and funnel events
 
@@ -77,13 +77,17 @@ controller.markPresented(campaign, at: .launchModal)
 // When the app opens its full paywall for this campaign:
 controller.markPaywallOpened(campaign, from: .floatingBadge)
 
-// On successful purchase (terminal):
+// On successful purchase (terminal; also releases the interruptive lock):
 controller.markConverted(campaign)
+
+// When the paywall closes WITHOUT a purchase — release the interruptive lock,
+// or every other placement reports .anotherPlacementActive until process exit:
+controller.markDismissed(campaign, at: .launchModal)
 ```
 
 The first `markPresented` of an `.exclusiveOffer` starts the 72-hour clock. Calling it before real visibility (eligibility check, prefetch, hidden view) silently burns the campaign window.
 
-The bundled SwiftUI surfaces call `markPresented` / `markClicked` / `markDismissed` internally via `onAppear` / action / `onDisappear`. When using them, the app wires only `markPaywallOpened` and `markConverted`.
+The bundled SwiftUI surfaces call `markPresented` (on appear) and `markClicked` (on action) internally; `PromotionLaunchOffer` additionally calls `markDismissed` on disappear — `PromotionFloatingBadge` and `PromotionSettingsBanner` do not. When using them, the app wires `markPaywallOpened`, `markConverted`, and the unconverted-close `markDismissed(_:at: .launchModal)` release shown above.
 
 ## Bundled surfaces and custom Styles
 
