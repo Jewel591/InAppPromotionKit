@@ -81,7 +81,11 @@ controller.markPaywallOpened(campaign, from: .floatingBadge)
 controller.markConverted(campaign)
 
 // When the paywall closes WITHOUT a purchase — release the interruptive lock,
-// or every other placement reports .anotherPlacementActive until process exit:
+// or every other placement reports .anotherPlacementActive until process exit.
+// Side effect: this also emits a dismiss event with placement fixed to
+// .launchModal (even for badge/banner-originated paywalls), and can double up
+// with PromotionLaunchOffer's own on-disappear dismiss — account for it in
+// funnel analysis:
 controller.markDismissed(campaign, at: .launchModal)
 ```
 
@@ -152,7 +156,7 @@ final class PromotionAnalyticsBridge: PromotionEventTracking {
 let controller = InAppPromotionController(tracker: PromotionAnalyticsBridge())
 ```
 
-Event semantics: `eligible` fires once per process when a campaign first evaluates eligible; `impression` fires per presentation for `.standardPaywall` and once per placement for `.exclusiveOffer`; `expired` fires when expiration is first observed. Do not duplicate these from app code.
+Event semantics: `eligible` fires at the start of each continuous eligible stretch — an `.ineligible` or `.unavailable` evaluation clears the dedup mark, so re-evaluating back to eligible emits it again; `impression` fires per presentation for `.standardPaywall` and once per placement for `.exclusiveOffer`; `expired` fires when expiration is first observed. Do not duplicate these from app code.
 
 ## Testing consumers
 
