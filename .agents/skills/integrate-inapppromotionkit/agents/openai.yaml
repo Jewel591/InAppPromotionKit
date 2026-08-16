@@ -1,0 +1,4 @@
+interface:
+  display_name: "Integrate InAppPromotionKit"
+  short_description: "Adopt the shared in-app promotion campaign layer"
+  default_prompt: "Use $integrate-inapppromotionkit to integrate or migrate this Apple app to InAppPromotionKit."

@@ -1,0 +1,47 @@
+---
+name: integrate-inapppromotionkit
+description: Integrate, migrate, review, or troubleshoot an Apple app that uses the InAppPromotionKit Swift package. Use when adding in-app promotion campaigns to a Swift/SwiftUI app, replacing app-local paywall-prompt cooldowns or limited-time-offer countdown logic, wiring launch modals, floating badges, or settings banners to shared campaign state, migrating legacy "last shown" UserDefaults keys, or auditing that campaign policy and state transitions are not reimplemented in the app.
+---
+
+# Integrate InAppPromotionKit
+
+Use InAppPromotionKit as the app's only owner of promotion campaign state: fixed display policies, durable per-campaign persistence, countdown and expiration semantics, placement coordination, and event semantics. The host app owns eligibility facts, campaign identity and content, products and purchase logic, the full paywall UI, navigation, and analytics backends.
+
+## Read the local contract
+
+Read the package `README.md` and the current public declarations under `Sources/InAppPromotionKit/` before changing an app. Do not reconstruct API names from memory. Fixed policies (24-hour standard-paywall cooldown, one-time 72-hour exclusive offer, 6-hour urgency threshold) are intentionally not configurable; do not work around them with app-side timers or ask for numeric knobs.
+
+Read [references/integration-reference.md](references/integration-reference.md) when writing new integration code or migrating an existing app. It contains the storage key layout, campaign-kind semantics, legacy migration snippets, and custom Style examples. Adapt names to the target app instead of copying another app's campaign IDs.
+
+Also read and obey the target repository's `AGENTS.md` / `CLAUDE.md` or equivalent instructions.
+
+## Follow this workflow
+
+1. Inspect the app for existing implementations the Kit replaces: hand-written paywall-prompt cooldowns, limited-time-offer countdown state, "already shown" flags, per-surface visibility booleans, and their UserDefaults keys. List each with its keys before writing any code.
+2. Add the `InAppPromotionKit` package dependency (`https://github.com/Jewel591/InAppPromotionKit`, up-to-next-major from the latest release) and the `InAppPromotionKit` product to the app target only. The Kit has no RevenueCat or StoreKit dependency by design; keep it that way in the app's package graph.
+3. Choose the campaign kind by semantics, not by tweaking policy: `.standardPaywall` is an evergreen launch prompt with a fixed 24-hour cooldown and supports only `.launchModal`; `.exclusiveOffer` is a one-time 72-hour campaign supporting `.launchModal`, `.floatingBadge`, and `.settingsBanner`. A campaign ID is a stable, versioned string (`exclusive-offer-2026q3`); reusing an ID resurrects its terminal state, and renaming an ID resets it, so choose deliberately.
+4. Provide eligibility from app facts. Map "user already has premium" to `.ineligible` and "cannot answer right now" (entitlement state unknown, offering not loaded) to `.unavailable` — never to `.eligible`. Eligibility answers *may this user see this campaign*; whether the moment is right stays with the app.
+5. Gate every surface through `InAppPromotionController.evaluate(_:for:eligibility:)` (or the async `PromotionEligibilityProviding` overload) and act only on `.present`. `snapshot(for:placement:)` reports `.ineligible` until `evaluate` has run for that campaign in the current process, so evaluate at least once per launch before rendering any surface.
+6. Record an impression with `markPresented(_:at:)` only after the destination is actually visible — an exclusive offer starts its 72-hour clock on the first real impression, so calling it from eligibility evaluation or before presentation silently burns the campaign. The bundled SwiftUI surfaces already call `markPresented`, `markClicked`, and `markDismissed` internally; do not call them again around those views.
+7. Prefer the bundled `PromotionLaunchOffer`, `PromotionFloatingBadge`, and `PromotionSettingsBanner` surfaces and restyle them through their placement-specific Style protocols (`PromotionLaunchOfferStyle`, `PromotionFloatingBadgeStyle`, `PromotionSettingsBannerStyle`). Styles replace rendering only; state transitions and event recording remain Kit-owned. `PromotionContent` takes `LocalizedStringKey`, so campaign copy is localized in the host app's catalog.
+8. Wire the funnel events the Kit cannot see: `markPaywallOpened(_:from:)` when the app presents its paywall for a campaign, and `markConverted(_:)` on successful purchase. Conversion and expiration are terminal for a campaign ID — the Kit hides every placement afterwards; do not add app-side "hide after purchase" flags on top.
+9. Respect presentation coordination on both levels. The Kit allows only one interruptive promotion at a time (other placements report `.anotherPlacementActive` while a launch modal or opened paywall is active). Which modal appears first app-wide is still the host app's surface coordinator's job — enqueue launch modals there; the Kit does not present anything itself.
+10. Migrate legacy state before the first evaluation on an existing install: seed a previous "launch prompt last shown" date with `importLegacyLaunchPresentationDate(_:for:)` so long-time users do not get an immediate re-prompt. Then delete the replaced app-local code — old cooldown math, shown-flags, and their key constants (keep key string literals only inside the one-time migration).
+11. If the app reports promotion analytics, implement `PromotionEventTracking` and pass it at controller construction; the Kit emits `eligible`, `impression`, `click`, `paywallOpened`, `dismiss`, `converted`, and `expired` with campaign and placement attached. Do not fire duplicate app-side events for the same semantics.
+12. Build and run the smallest relevant tests. When testing code that consumes the Kit, construct a dedicated controller with `UserDefaults(suiteName:)`; never test against `.standard` or the shared controller.
+
+## Preserve these boundaries
+
+- The Kit answers *is this campaign presentable here, now* and *how long remains*; it never decides what a campaign says or sells.
+- The app answers *who is eligible*, *what the offer is*, *what the paywall looks like*, and *how purchase happens* (via RevenueCatKit where adopted — the two Kits stay independent).
+- The app's surface coordinator answers which modal appears first; the Kit only refuses to overlap its own interruptive placements.
+- Fixed policies stay fixed. A genuinely different cross-product policy is a new semantic campaign kind in the Kit, approved upstream — not a per-app fork or numeric parameter.
+- Storage under the `InAppPromotionKit.` UserDefaults prefix belongs to the Kit. Never write it directly; `importLegacyLaunchPresentationDate` and `reset` are the only sanctioned mutations outside normal use. Campaign state survives launches and upgrades but not app deletion.
+
+## Reference UI implementations
+
+For the UI implementation of paywalls, settings-page marketing, and app-launch marketing surfaces, refer to our own private project [screenstudies](https://github.com/Jewel591/screenstudies) — a runnable SwiftUI reference library of studied app screens. Relevant studies include `Screens/Paywall/AppleMusic/ThreeMonthTrial` (full-screen offer paywall), `Screens/Paywall/Grok/SettingsUpgradeBanner` (settings-page upgrade banner), and `Screens/Paywall/Vinyls/CoverWall` (launch offer). Use them as design and structure references for custom Styles and host paywalls; adapt branding and copy to the target app instead of copying verbatim.
+
+## Review the result
+
+Before declaring the integration complete, search the whole app for leftover promotion state the Kit now owns: surviving cooldown date math, "offer already shown" or "offer expired" flags being written, and countdown timers computing their own deadlines. Confirm every `markPresented` call site fires only on real visibility, that the bundled surfaces are not double-instrumented, and that premium users evaluate to `.ineligible` on every surface. Confirm an existing user upgrading to this build keeps their previous launch-prompt cooldown via the legacy import and is not re-prompted immediately. State explicitly which legacy UserDefaults keys were migrated, which were left for other consumers, and which were deleted.
