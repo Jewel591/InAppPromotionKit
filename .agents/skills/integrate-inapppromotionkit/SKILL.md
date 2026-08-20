@@ -38,6 +38,13 @@ Also read and obey the target repository's `AGENTS.md` / `CLAUDE.md` or equivale
 - Fixed policies stay fixed. A genuinely different cross-product policy is a new semantic campaign kind in the Kit, approved upstream — not a per-app fork or numeric parameter.
 - Storage under the `InAppPromotionKit.` UserDefaults prefix belongs to the Kit. Never write it directly; `importLegacyLaunchPresentationDate` and `reset` are the only sanctioned mutations outside normal use. Campaign state survives launches and upgrades but not app deletion.
 
+## Host tests
+
+- Test host-owned eligibility mapping, campaign content, paywall routing, analytics mapping, surface coordination, and every real shipped legacy key imported during migration.
+- Do not repeat the Kit's cooldown, terminal-state, placement-lock, countdown, or event-order state machine tests in each app. Those fixed contracts belong to package tests.
+- Do not scan `project.pbxproj`, imports, constructor strings, or old type names in XCTest; structural assembly and residual implementation checks belong to the playbook lint.
+- Use an isolated `UserDefaults(suiteName:)`, fixed time, fakes, and public APIs only. If two apps copy the same controller helper or assertions, move that semantic seam and its tests into InAppPromotionKit rather than creating a portfolio-wide TestSupport package.
+
 ## Reference UI implementations
 
 For the UI implementation of paywalls, settings-page marketing, and app-launch marketing surfaces, refer to our own private project [screenstudies](https://github.com/Jewel591/screenstudies) — a runnable SwiftUI reference library of studied app screens. Relevant studies include `Screens/Paywall/AppleMusic/ThreeMonthTrial` (full-screen offer paywall), `Screens/Paywall/Grok/SettingsUpgradeBanner` (settings-page upgrade banner), and `Screens/Paywall/Vinyls/CoverWall` (launch offer). Use them as design and structure references for custom Styles and host paywalls; adapt branding and copy to the target app instead of copying verbatim.
