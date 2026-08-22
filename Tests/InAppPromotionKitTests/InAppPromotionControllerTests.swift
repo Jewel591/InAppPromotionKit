@@ -9,6 +9,16 @@ struct InAppPromotionControllerTests {
         let fixture = try Fixture()
         let campaign = PromotionCampaign(id: "standard", kind: .standardPaywall)
 
+        fixture.controller.registerLaunch()
+        #expect(
+            fixture.controller.evaluate(
+                campaign,
+                for: .launchModal,
+                eligibility: .eligible
+            ) == .hidden(.initialCooldown)
+        )
+
+        fixture.clock.date = fixture.clock.date.addingTimeInterval(24 * 60 * 60)
         #expect(
             fixture.controller.evaluate(
                 campaign,
@@ -72,6 +82,7 @@ struct InAppPromotionControllerTests {
         let fixture = try Fixture()
         let campaign = PromotionCampaign(id: "exclusive", kind: .exclusiveOffer)
 
+        fixture.completeInitialLaunchCooldown()
         _ = fixture.controller.evaluate(
             campaign,
             for: .launchModal,
@@ -221,6 +232,181 @@ struct InAppPromotionControllerTests {
             ) == .hidden(.cooldown)
         )
     }
+
+    @Test
+    func launchGateUsesExactFirstLaunchBoundary() throws {
+        let fixture = try Fixture()
+        let campaign = PromotionCampaign(id: "standard", kind: .standardPaywall)
+
+        fixture.controller.registerLaunch()
+        fixture.clock.date = fixture.clock.date.addingTimeInterval(24 * 60 * 60 - 1)
+        #expect(
+            fixture.controller.evaluate(
+                campaign,
+                for: .launchModal,
+                eligibility: .eligible
+            ) == .hidden(.initialCooldown)
+        )
+
+        fixture.clock.date = fixture.clock.date.addingTimeInterval(1)
+        #expect(
+            fixture.controller.evaluate(
+                campaign,
+                for: .launchModal,
+                eligibility: .eligible
+            ) == .present
+        )
+    }
+
+    @Test
+    func launchEvaluationRegistersGateEvenWhenEligibilityIsNotEligible() throws {
+        let fixture = try Fixture()
+        let campaign = PromotionCampaign(id: "standard", kind: .standardPaywall)
+
+        #expect(
+            fixture.controller.evaluate(
+                campaign,
+                for: .launchModal,
+                eligibility: .unavailable
+            ) == .hidden(.unavailable)
+        )
+
+        fixture.clock.date = fixture.clock.date.addingTimeInterval(24 * 60 * 60)
+        #expect(
+            fixture.controller.evaluate(
+                campaign,
+                for: .launchModal,
+                eligibility: .eligible
+            ) == .present
+        )
+    }
+
+    @Test
+    func initialGateDoesNotStartExclusiveOfferLifetime() throws {
+        let fixture = try Fixture()
+        let campaign = PromotionCampaign(id: "exclusive", kind: .exclusiveOffer)
+
+        fixture.controller.registerLaunch()
+        #expect(
+            fixture.controller.evaluate(
+                campaign,
+                for: .launchModal,
+                eligibility: .eligible
+            ) == .hidden(.initialCooldown)
+        )
+        #expect(
+            fixture.controller.snapshot(
+                for: campaign,
+                placement: .floatingBadge
+            ).remainingTime == nil
+        )
+
+        fixture.clock.date = fixture.clock.date.addingTimeInterval(24 * 60 * 60)
+        #expect(
+            fixture.controller.evaluate(
+                campaign,
+                for: .launchModal,
+                eligibility: .eligible
+            ) == .present
+        )
+        #expect(
+            fixture.controller.snapshot(
+                for: campaign,
+                placement: .floatingBadge
+            ).remainingTime == nil
+        )
+    }
+
+    @Test
+    func resettingCampaignDoesNotClearInstallLaunchGate() throws {
+        let fixture = try Fixture()
+        let campaign = PromotionCampaign(id: "standard", kind: .standardPaywall)
+
+        fixture.controller.registerLaunch()
+        fixture.clock.date = fixture.clock.date.addingTimeInterval(60 * 60)
+        fixture.controller.reset(campaign)
+
+        #expect(
+            fixture.controller.evaluate(
+                campaign,
+                for: .launchModal,
+                eligibility: .eligible
+            ) == .hidden(.initialCooldown)
+        )
+    }
+
+    @Test
+    func snapshotDoesNotRegisterFirstLaunch() throws {
+        let fixture = try Fixture()
+        let campaign = PromotionCampaign(id: "exclusive", kind: .exclusiveOffer)
+
+        _ = fixture.controller.evaluate(
+            campaign,
+            for: .floatingBadge,
+            eligibility: .eligible
+        )
+        #expect(
+            fixture.controller.snapshot(
+                for: campaign,
+                placement: .launchModal
+            ).hiddenReason == .initialCooldown
+        )
+
+        fixture.clock.date = fixture.clock.date.addingTimeInterval(24 * 60 * 60)
+        #expect(
+            fixture.controller.evaluate(
+                campaign,
+                for: .launchModal,
+                eligibility: .eligible
+            ) == .hidden(.initialCooldown)
+        )
+    }
+
+    @Test
+    func existingKitLaunchEvidenceAvoidsASecondInitialCooldown() throws {
+        let fixture = try Fixture()
+        let campaign = PromotionCampaign(id: "standard", kind: .standardPaywall)
+        let previousPresentation = fixture.clock.date.addingTimeInterval(-2 * 24 * 60 * 60)
+
+        fixture.controller.importLegacyLaunchPresentationDate(
+            previousPresentation,
+            for: campaign
+        )
+        fixture.defaults.removeObject(
+            forKey: PromotionStateStore.firstLaunchRegisteredAtKey
+        )
+
+        let relaunchedController = fixture.makeController()
+        relaunchedController.registerLaunch()
+        #expect(
+            relaunchedController.evaluate(
+                campaign,
+                for: .launchModal,
+                eligibility: .eligible
+            ) == .present
+        )
+    }
+
+    @Test
+    func legacyImportBackdatesAlreadyRegisteredGate() throws {
+        let fixture = try Fixture()
+        let campaign = PromotionCampaign(id: "standard", kind: .standardPaywall)
+        let previousPresentation = fixture.clock.date.addingTimeInterval(-2 * 24 * 60 * 60)
+
+        fixture.controller.registerLaunch()
+        fixture.controller.importLegacyLaunchPresentationDate(
+            previousPresentation,
+            for: campaign
+        )
+
+        #expect(
+            fixture.controller.evaluate(
+                campaign,
+                for: .launchModal,
+                eligibility: .eligible
+            ) == .present
+        )
+    }
 }
 
 @MainActor
@@ -240,6 +426,11 @@ private final class Fixture {
             userDefaults: defaults,
             now: { [clock] in clock.date }
         )
+    }
+
+    func completeInitialLaunchCooldown() {
+        controller.registerLaunch()
+        clock.date = clock.date.addingTimeInterval(24 * 60 * 60)
     }
 }
 

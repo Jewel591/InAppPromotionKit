@@ -6,6 +6,7 @@ Verify names against the package's current source before relying on them — the
 
 | Policy | Value | Applies to |
 |---|---|---|
+| First-launch quiet period | 24 hours from the first `registerLaunch()`; install-level, not configurable | every `.launchModal` campaign |
 | Standard paywall cooldown | 24 hours since the last `.launchModal` impression | `.standardPaywall` |
 | Exclusive offer duration | 72 hours from the **first real impression** at any placement | `.exclusiveOffer` |
 | Urgency threshold | remaining time ≤ 6 hours → `PromotionUrgency.urgent` | countdown surfaces |
@@ -13,15 +14,16 @@ Verify names against the package's current source before relying on them — the
 | Launch modal repeat | an exclusive offer's `.launchModal` shows once; later launches rely on badge/banner | `.exclusiveOffer` |
 | Interruptive exclusivity | while a launch modal or opened paywall is active, other placements hide with `.anotherPlacementActive` | all campaigns |
 
-Terminal states: `markConverted` and expiration each permanently hide every placement for that campaign ID. `reset(_:)` erases a campaign's state entirely — debug/QA use only.
+Terminal states: `markConverted` and expiration each permanently hide every placement for that campaign ID. `reset(_:)` erases a campaign's state entirely — debug/QA use only. It deliberately does not clear the install-level first-launch quiet period.
 
 ## Storage layout (Kit-owned)
 
-All campaign state persists as one JSON blob under a single UserDefaults key:
+Campaign state and the install-level launch gate persist under package-owned UserDefaults keys:
 
 | Key | Content |
 |---|---|
 | `InAppPromotionKit.campaignStates.v1` | `[campaignID: {firstPresentedAt, expiresAt, lastLaunchPresentedAt, presentedPlacements, terminalState}]` |
+| `InAppPromotionKit.firstLaunchRegisteredAt.v1` | first app-launch timestamp used by the fixed 24-hour launch-modal quiet period |
 
 Never write this key directly. State survives launches and app upgrades through `UserDefaults`, but not app deletion.
 
@@ -44,6 +46,14 @@ enum PromotionCampaigns {
 
 Use `InAppPromotionController.shared` in app code. Construct `InAppPromotionController(userDefaults:tracker:)` yourself only for tests or to attach an analytics tracker at composition level.
 
+After the one-time legacy import below, register every app launch at composition startup:
+
+```swift
+InAppPromotionController.shared.registerLaunch()
+```
+
+The call is idempotent. `evaluate` records a launch defensively if this hook was missed, but that starts the 24-hour clock late and is not a valid replacement. Badge/banner evaluation and `snapshot` never register a launch.
+
 ## Gating a launch prompt
 
 ```swift
@@ -64,6 +74,8 @@ Eligibility mapping rules:
 - Entitlement or offering state unknown right now → `.unavailable` (never `.eligible`)
 - May purchase → `.eligible`
 
+Only confirmed non-members are `.eligible`. Grace-period access remains premium. When an entitlement refresh changes a visible launch promotion to `.ineligible` or `.unavailable`, dismiss the host-owned cover and ask the surface coordinator to arbitrate again.
+
 With async eligibility, conform to `PromotionEligibilityProviding` and use the `evaluate(_:for:using:)` overload; concurrent evaluations of the same campaign return `.hidden(.evaluationInProgress)`.
 
 `snapshot(for:placement:)` answers `.ineligible` until `evaluate` has run for that campaign in the current process — evaluate once per launch before rendering badges or banners, and **re-evaluate whenever an eligibility input changes** (entitlement resolves, offering loads, purchase/restore completes). A `.unavailable` result is not retried by the Kit; without a fresh `evaluate` the campaign stays hidden for the whole process.
@@ -78,7 +90,7 @@ controller.markPresented(campaign, at: .launchModal)
 controller.markPaywallOpened(campaign, from: .floatingBadge)
 
 // On successful purchase (terminal; also releases the interruptive lock):
-controller.markConverted(campaign)
+controller.markConverted(campaign) // only when conversion came through this campaign
 
 // When the paywall closes WITHOUT a purchase — release the interruptive lock,
 // or every other placement reports .anotherPlacementActive until process exit.
@@ -128,7 +140,7 @@ Styles replace rendering only. Do not re-derive expiration, cooldown, or visibil
 
 ## Legacy migration
 
-On an existing install the Kit's state is empty, so a `.standardPaywall` campaign presents immediately after the update even if the app showed its old prompt an hour ago. Import the old timestamp once, before the first `evaluate`:
+On an existing install, import the old timestamp once before `registerLaunch()` and the first `evaluate`:
 
 ```swift
 // Example legacy key: an app-local "launch paywall last shown" date.
@@ -137,9 +149,10 @@ InAppPromotionController.shared.importLegacyLaunchPresentationDate(
     legacyDate,
     for: PromotionCampaigns.standardPaywall
 )
+InAppPromotionController.shared.registerLaunch()
 ```
 
-The import is idempotent: it does nothing when the campaign already has a launch-presentation date. Keep the legacy key literal only inside the migration; delete the type that owned it. If a hand-written throttle around the same prompt was already migrated to AppContextKit's `Throttle`, pick one owner — a launch paywall gated by this Kit does not also need an app-side throttle.
+The import is idempotent and also backdates the install gate when needed, regardless of whether registration accidentally happened first. Existing Kit launch-presentation evidence similarly prevents a second initial wait. With neither Kit evidence nor a legacy date, an upgraded install starts one 24-hour quiet period from its first launch on the new build. Keep the legacy key literal only inside the one-time migration; delete the type that owned it. If a hand-written throttle around the same prompt was already migrated to AppContextKit's `Throttle`, remove that duplicate — a launch paywall gated by this Kit does not also need an app-side throttle.
 
 ## Analytics
 

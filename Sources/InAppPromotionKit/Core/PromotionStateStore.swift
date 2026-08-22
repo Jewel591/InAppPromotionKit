@@ -17,6 +17,7 @@ struct StoredPromotionState: Codable, Equatable {
 @MainActor
 final class PromotionStateStore {
     static let storageKey = "InAppPromotionKit.campaignStates.v1"
+    static let firstLaunchRegisteredAtKey = "InAppPromotionKit.firstLaunchRegisteredAt.v1"
 
     private let defaults: UserDefaults
     private var states: [String: StoredPromotionState]
@@ -44,6 +45,21 @@ final class PromotionStateStore {
 
     func state(for campaignID: String) -> StoredPromotionState {
         states[campaignID] ?? StoredPromotionState()
+    }
+
+    var firstLaunchRegisteredAt: Date? {
+        defaults.object(forKey: Self.firstLaunchRegisteredAtKey) as? Date
+    }
+
+    var earliestLaunchPresentationAt: Date? {
+        states.values.compactMap(\.lastLaunchPresentedAt).min()
+    }
+
+    func registerFirstLaunch(noLaterThan date: Date) {
+        if let existing = firstLaunchRegisteredAt, existing <= date {
+            return
+        }
+        defaults.set(date, forKey: Self.firstLaunchRegisteredAtKey)
     }
 
     func update(

@@ -11,7 +11,9 @@ public struct PromotionCampaign: Hashable, Codable, Sendable {
 }
 
 public enum PromotionKind: String, Codable, Sendable {
-    /// An evergreen paywall prompt, shown at launch no more than once every 24 hours.
+    /// An evergreen paywall prompt. Launch presentation begins only after the
+    /// install-level first-launch quiet period and then occurs no more than once
+    /// every 24 hours.
     case standardPaywall
 
     /// A one-time, 72-hour offer shared by launch, floating-badge, and settings placements.
@@ -39,6 +41,7 @@ public enum PromotionHiddenReason: String, Equatable, Sendable {
     case ineligible
     case unavailable
     case unsupportedPlacement
+    case initialCooldown
     case cooldown
     case alreadyPresented
     case expired
