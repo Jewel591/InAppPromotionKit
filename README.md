@@ -6,7 +6,9 @@ optional SwiftUI surfaces whose rendering can be replaced through placement-spec
 
 ## Fixed policies
 
-- `standardPaywall`: launch-only, with a fixed 24-hour cooldown.
+- Every launch-modal campaign stays hidden for the first 24 hours after the app's first
+  registered launch. The quiet period is install-level and is not configurable.
+- `standardPaywall`: launch-only, with a further fixed 24-hour cooldown between impressions.
 - `exclusiveOffer`: a one-time 72-hour campaign supporting launch modal, floating badge, and
   settings banner placements.
 - An exclusive offer starts its clock on the first real impression, not eligibility evaluation.
@@ -28,10 +30,13 @@ let campaign = PromotionCampaign(
     kind: .standardPaywall
 )
 
+// Call at composition startup on every app launch. This is idempotent.
+InAppPromotionController.shared.registerLaunch()
+
 let decision = InAppPromotionController.shared.evaluate(
     campaign,
     for: .launchModal,
-    eligibility: isPremium ? .ineligible : .eligible
+    eligibility: entitlementIsConfirmedFree ? .eligible : .unavailable
 )
 
 if decision == .present {

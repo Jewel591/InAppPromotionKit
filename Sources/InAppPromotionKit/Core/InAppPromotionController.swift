@@ -37,6 +37,13 @@ public final class InAppPromotionController {
         self.now = now
     }
 
+    /// Records the app's first launch for the package-owned launch-promotion
+    /// quiet period. Call once from the app composition root on every launch;
+    /// repeated calls are idempotent.
+    public func registerLaunch() {
+        ensureLaunchRegistered(at: now())
+    }
+
     public func evaluate(
         _ campaign: PromotionCampaign,
         for placement: PromotionPlacement,
@@ -58,6 +65,10 @@ public final class InAppPromotionController {
     ) -> PromotionDecision {
         guard PromotionPolicy.supports(placement, for: campaign.kind) else {
             return .hidden(.unsupportedPlacement)
+        }
+
+        if placement == .launchModal {
+            ensureLaunchRegistered(at: now())
         }
 
         switch eligibility {
@@ -203,11 +214,13 @@ public final class InAppPromotionController {
         for campaign: PromotionCampaign
     ) {
         guard let date else { return }
+        let importDate = min(date, now())
+        store.registerFirstLaunch(noLaterThan: importDate)
         let state = store.state(for: campaign.id)
         guard state.lastLaunchPresentedAt == nil else { return }
         store.update(campaignID: campaign.id) { importedState in
-            importedState.firstPresentedAt = importedState.firstPresentedAt ?? date
-            importedState.lastLaunchPresentedAt = date
+            importedState.firstPresentedAt = importedState.firstPresentedAt ?? importDate
+            importedState.lastLaunchPresentedAt = importDate
             importedState.presentedPlacements.insert(.launchModal)
         }
         revision += 1
@@ -257,6 +270,16 @@ public final class InAppPromotionController {
             return .hidden(.anotherPlacementActive)
         }
 
+        if placement == .launchModal, state.lastLaunchPresentedAt == nil {
+            guard let firstLaunchRegisteredAt = store.firstLaunchRegisteredAt else {
+                return .hidden(.initialCooldown)
+            }
+            guard date.timeIntervalSince(firstLaunchRegisteredAt)
+                >= PromotionPolicy.standardPaywallCooldown else {
+                return .hidden(.initialCooldown)
+            }
+        }
+
         switch campaign.kind {
         case .standardPaywall:
             guard let lastLaunchPresentedAt = state.lastLaunchPresentedAt else {
@@ -295,6 +318,17 @@ public final class InAppPromotionController {
     private func clearActivePresentation(for campaign: PromotionCampaign) {
         if activeInterruptiveCampaignID == campaign.id {
             activeInterruptiveCampaignID = nil
+        }
+    }
+
+    private func ensureLaunchRegistered(at date: Date) {
+        let registrationDate = store.earliestLaunchPresentationAt.map {
+            min($0, date)
+        } ?? date
+        let existing = store.firstLaunchRegisteredAt
+        store.registerFirstLaunch(noLaterThan: registrationDate)
+        if existing != store.firstLaunchRegisteredAt {
+            revision += 1
         }
     }
 }
