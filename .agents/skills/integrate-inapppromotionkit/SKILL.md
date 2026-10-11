@@ -13,7 +13,7 @@ Read the package `README.md` and the current public declarations under `Sources/
 
 Read [references/integration-reference.md](references/integration-reference.md) when writing new integration code or migrating an existing app. It contains the storage key layout, campaign-kind semantics, legacy migration snippets, and custom Style examples. Adapt names to the target app instead of copying another app's campaign IDs.
 
-Also read and obey the target repository's `AGENTS.md` / `CLAUDE.md` or equivalent instructions.
+Also read and obey the target repository's `AGENTS.md` / `AGENTS.md` or equivalent instructions.
 
 ## Follow this workflow
 
